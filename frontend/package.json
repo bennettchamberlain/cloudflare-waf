@@ -1,12 +1,14 @@
 {
-  "name": "frontend",
-  "version": "0.1.0",
+  "name": "bot-shield-frontend",
+  "version": "1.0.0",
+  "description": "Bot Shield Frontend - Platform-specific bot management dashboard",
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "type-check": "tsc --noEmit"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.1.1",
@@ -30,6 +32,7 @@
     "react-hook-form": "^7.59.0",
     "recharts": "^3.0.2",
     "tailwind-merge": "^3.3.1",
+    "tailwindcss-animate": "^1.0.7",
     "zod": "^3.25.71"
   },
   "devDependencies": {
@@ -40,7 +43,27 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "15.3.5",
+    "postcss": "^8.4.47",
     "tailwindcss": "^4",
     "typescript": "^5"
-  }
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/bot-shield"
+  },
+  "keywords": [
+    "bot-management",
+    "cloudflare-workers",
+    "webflow",
+    "netlify", 
+    "vercel",
+    "shopify",
+    "bandwidth-savings",
+    "ddos-protection"
+  ],
+  "author": "Bot Shield Team",
+  "license": "MIT"
 }
