@@ -1,9 +1,5 @@
-import BotShieldDashboard from '@/components/BotShieldDashboard';
+import ModernLandingPage from '@/components/ModernLandingPage';
 
 export default function Home() {
-  return (
-    <main>
-      <BotShieldDashboard />
-    </main>
-  );
+  return <ModernLandingPage />;
 }
