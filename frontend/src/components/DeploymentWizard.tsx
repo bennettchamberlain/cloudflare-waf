@@ -6,359 +6,548 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { 
-  Zap, 
+  Shield, 
+  Globe, 
+  Settings, 
   CheckCircle, 
-  Copy, 
-  ExternalLink, 
-  AlertTriangle,
-  Clock,
-  Shield,
+  AlertCircle,
+  ArrowRight,
+  ArrowLeft,
+  Zap,
+  Key,
+  Eye,
+  EyeOff,
+  Copy,
+  ExternalLink,
   Loader2
 } from 'lucide-react';
+import { apiClient } from '@/lib/api';
 
-interface DeploymentWizardProps {
-  domain: string;
-  platform: string;
+interface OnboardingStep {
+  id: string;
+  title: string;
+  description: string;
+  component: React.ReactNode;
 }
 
-export function DeploymentWizard({ domain, platform }: DeploymentWizardProps) {
-  const [step, setStep] = useState(1);
-  const [apiToken, setApiToken] = useState('');
-  const [zoneId, setZoneId] = useState('');
-  const [isDeploying, setIsDeploying] = useState(false);
-  const [deploymentStatus, setDeploymentStatus] = useState<'idle' | 'deploying' | 'success' | 'error'>('idle');
+interface DeploymentWizardProps {
+  onComplete: (domain: string) => void;
+}
 
-  const deploymentSteps = [
-    {
-      title: 'Connect Cloudflare',
-      description: 'Add your Cloudflare API token to enable deployment',
-      icon: <Zap className="h-5 w-5" />
-    },
-    {
-      title: 'Configure Zone',
-      description: 'Select your domain zone for protection',
-      icon: <Shield className="h-5 w-5" />
-    },
-    {
-      title: 'Deploy Worker',
-      description: 'Deploy the bot protection worker to your domain',
-      icon: <CheckCircle className="h-5 w-5" />
-    }
-  ];
+export default function DeploymentWizard({ onComplete }: DeploymentWizardProps) {
+  const [currentStep, setCurrentStep] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  
+  // Form data
+  const [formData, setFormData] = useState({
+    domain: '',
+    platform: 'webflow',
+    cloudflareToken: '',
+    showToken: false,
+    verificationMethod: 'dns' as 'dns' | 'meta',
+    selectedTemplates: [] as string[]
+  });
 
-  const handleDeploy = async () => {
-    setIsDeploying(true);
-    setDeploymentStatus('deploying');
+  const [verificationStatus, setVerificationStatus] = useState<'pending' | 'verified' | 'failed'>('pending');
+  const [deploymentStatus, setDeploymentStatus] = useState<'pending' | 'deploying' | 'completed' | 'failed'>('pending');
+
+  const updateFormData = (field: string, value: any) => {
+    setFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  const handleVerifyDomain = async () => {
+    if (!formData.domain) return;
+    
+    setLoading(true);
+    setError(null);
     
     try {
-      // Simulate deployment process
-      await new Promise(resolve => setTimeout(resolve, 3000));
-      setDeploymentStatus('success');
-      setStep(4);
-    } catch (error) {
-      setDeploymentStatus('error');
+      const result = await apiClient.verifyDomain({
+        domain: formData.domain,
+        verification_method: formData.verificationMethod
+      });
+      
+      if (result.success) {
+        setVerificationStatus('verified');
+        setCurrentStep(2);
+      } else {
+        setVerificationStatus('failed');
+        setError('Domain verification failed. Please check your DNS settings.');
+      }
+    } catch (err) {
+      setVerificationStatus('failed');
+      setError('Failed to verify domain. Please try again.');
     } finally {
-      setIsDeploying(false);
+      setLoading(false);
     }
   };
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
+  const handleConnectCloudflare = async () => {
+    if (!formData.cloudflareToken) return;
+    
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const result = await apiClient.connectCloudflare({
+        api_token: formData.cloudflareToken
+      });
+      
+      if (result.success) {
+        setCurrentStep(3);
+      } else {
+        setError('Failed to connect Cloudflare account. Please check your API token.');
+      }
+    } catch (err) {
+      setError('Failed to connect Cloudflare account. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const workerScript = `
-// Bot Shield Worker for ${domain}
-export default {
-  async fetch(request, env, ctx) {
-    const url = new URL(request.url);
-    const userAgent = request.headers.get('User-Agent') || '';
+  const handleDeployWorkers = async () => {
+    if (formData.selectedTemplates.length === 0) return;
     
-    // Bot detection logic
-    const botScore = calculateBotScore(userAgent, request);
+    setLoading(true);
+    setDeploymentStatus('deploying');
+    setError(null);
     
-    if (botScore > 80) {
-      return new Response('Access Denied', { status: 403 });
+    try {
+      // Deploy each selected template
+      for (const templateId of formData.selectedTemplates) {
+        await apiClient.applyWAFRule({
+          template_id: templateId,
+          enabled: true
+        });
+      }
+      
+      setDeploymentStatus('completed');
+      setTimeout(() => {
+        onComplete(formData.domain);
+      }, 2000);
+    } catch (err) {
+      setDeploymentStatus('failed');
+      setError('Failed to deploy protection rules. Please try again.');
+    } finally {
+      setLoading(false);
     }
-    
-    // Continue to origin
-    return fetch(request);
-  }
-};
+  };
 
-function calculateBotScore(userAgent, request) {
-  let score = 0;
-  
-  // Check for common bot patterns
-  if (userAgent.includes('scrapy')) score += 70;
-  if (userAgent.includes('python-requests')) score += 60;
-  if (userAgent.includes('curl')) score += 50;
-  
-  return score;
-}`;
-
-  return (
-    <div className="space-y-6">
-      {/* Progress Steps */}
-      <Card className="bg-white/70 backdrop-blur-sm border-0 shadow-lg">
-        <CardHeader>
-          <CardTitle>Deployment Progress</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center justify-between mb-6">
-            {deploymentSteps.map((stepInfo, idx) => (
-              <div key={idx} className="flex items-center">
-                <div className={`flex items-center justify-center w-10 h-10 rounded-full ${
-                  step > idx + 1 ? 'bg-green-500 text-white' : 
-                  step === idx + 1 ? 'bg-blue-500 text-white' : 
-                  'bg-gray-200 text-gray-500'
-                }`}>
-                  {step > idx + 1 ? <CheckCircle className="h-5 w-5" /> : stepInfo.icon}
-                </div>
-                {idx < deploymentSteps.length - 1 && (
-                  <div className={`w-20 h-1 mx-2 ${
-                    step > idx + 1 ? 'bg-green-500' : 'bg-gray-200'
-                  }`}></div>
-                )}
+  const steps: OnboardingStep[] = [
+    {
+      id: 'domain',
+      title: 'Enter Your Domain',
+      description: 'Start by adding the domain you want to protect',
+      component: (
+        <div className="space-y-6">
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="domain">Domain Name</Label>
+              <Input
+                id="domain"
+                type="text"
+                placeholder="yourdomain.com"
+                value={formData.domain}
+                onChange={(e) => updateFormData('domain', e.target.value)}
+                className="mt-1"
+              />
+              <p className="text-sm text-slate-600 mt-1">
+                Enter your domain without http:// or www
+              </p>
+            </div>
+            
+            <div>
+              <Label htmlFor="platform">Platform</Label>
+              <select
+                id="platform"
+                value={formData.platform}
+                onChange={(e) => updateFormData('platform', e.target.value)}
+                className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                <option value="webflow">Webflow</option>
+                <option value="netlify">Netlify</option>
+                <option value="vercel">Vercel</option>
+                <option value="shopify">Shopify</option>
+                <option value="wordpress">WordPress</option>
+                <option value="custom">Custom</option>
+              </select>
+            </div>
+          </div>
+          
+          <Button 
+            onClick={() => setCurrentStep(1)}
+            disabled={!formData.domain}
+            className="w-full"
+          >
+            Continue
+            <ArrowRight className="w-4 h-4 ml-2" />
+          </Button>
+        </div>
+      )
+    },
+    {
+      id: 'verification',
+      title: 'Verify Domain Ownership',
+      description: 'Prove you own this domain to continue',
+      component: (
+        <div className="space-y-6">
+          <div className="space-y-4">
+            <div>
+              <Label>Verification Method</Label>
+              <div className="mt-2 space-y-2">
+                <label className="flex items-center space-x-2">
+                  <input
+                    type="radio"
+                    value="dns"
+                    checked={formData.verificationMethod === 'dns'}
+                    onChange={(e) => updateFormData('verificationMethod', e.target.value)}
+                  />
+                  <span>DNS Record (Recommended)</span>
+                </label>
+                <label className="flex items-center space-x-2">
+                  <input
+                    type="radio"
+                    value="meta"
+                    checked={formData.verificationMethod === 'meta'}
+                    onChange={(e) => updateFormData('verificationMethod', e.target.value)}
+                  />
+                  <span>Meta Tag</span>
+                </label>
               </div>
+            </div>
+            
+            {formData.verificationMethod === 'dns' && (
+              <Card className="bg-blue-50 border-blue-200">
+                <CardContent className="pt-6">
+                  <h4 className="font-medium text-blue-900 mb-2">DNS Verification</h4>
+                  <p className="text-sm text-blue-700 mb-4">
+                    Add this TXT record to your DNS settings:
+                  </p>
+                  <div className="bg-white p-3 rounded border">
+                    <div className="text-sm">
+                      <div><strong>Type:</strong> TXT</div>
+                      <div><strong>Name:</strong> _cf-waf-verification.{formData.domain}</div>
+                      <div><strong>Value:</strong> cf-waf-demo-user-{formData.domain}</div>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="mt-2"
+                      onClick={() => navigator.clipboard.writeText(`_cf-waf-verification.${formData.domain}`)}
+                    >
+                      <Copy className="w-4 h-4 mr-1" />
+                      Copy Record
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+            
+            {formData.verificationMethod === 'meta' && (
+              <Card className="bg-blue-50 border-blue-200">
+                <CardContent className="pt-6">
+                  <h4 className="font-medium text-blue-900 mb-2">Meta Tag Verification</h4>
+                  <p className="text-sm text-blue-700 mb-4">
+                    Add this meta tag to your website's &lt;head&gt; section:
+                  </p>
+                  <div className="bg-white p-3 rounded border">
+                    <code className="text-sm">
+                      &lt;meta name="cf-waf-verification" content="cf-waf-demo-user-{formData.domain}"&gt;
+                    </code>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="mt-2"
+                      onClick={() => navigator.clipboard.writeText(`<meta name="cf-waf-verification" content="cf-waf-demo-user-${formData.domain}">`)}
+                    >
+                      <Copy className="w-4 h-4 mr-1" />
+                      Copy Tag
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+          
+          <div className="flex space-x-3">
+            <Button 
+              variant="outline"
+              onClick={() => setCurrentStep(0)}
+              className="flex-1"
+            >
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Back
+            </Button>
+            <Button 
+              onClick={handleVerifyDomain}
+              disabled={loading}
+              className="flex-1"
+            >
+              {loading ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <CheckCircle className="w-4 h-4 mr-2" />
+              )}
+              Verify Domain
+            </Button>
+          </div>
+        </div>
+      )
+    },
+    {
+      id: 'cloudflare',
+      title: 'Connect Cloudflare',
+      description: 'Link your Cloudflare account to deploy protection',
+      component: (
+        <div className="space-y-6">
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="cloudflareToken">Cloudflare API Token</Label>
+              <div className="relative mt-1">
+                <Input
+                  id="cloudflareToken"
+                  type={formData.showToken ? 'text' : 'password'}
+                  placeholder="Enter your Cloudflare API token"
+                  value={formData.cloudflareToken}
+                  onChange={(e) => updateFormData('cloudflareToken', e.target.value)}
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="absolute right-0 top-0 h-full px-3"
+                  onClick={() => updateFormData('showToken', !formData.showToken)}
+                >
+                  {formData.showToken ? (
+                    <EyeOff className="w-4 h-4" />
+                  ) : (
+                    <Eye className="w-4 h-4" />
+                  )}
+                </Button>
+              </div>
+              <p className="text-sm text-slate-600 mt-1">
+                Create a token with Zone:Zone:Edit and Zone:Zone:Read permissions
+              </p>
+            </div>
+            
+            <Card className="bg-amber-50 border-amber-200">
+              <CardContent className="pt-6">
+                <h4 className="font-medium text-amber-900 mb-2">Need Help?</h4>
+                <p className="text-sm text-amber-700 mb-3">
+                  Don't have a Cloudflare API token? Here's how to create one:
+                </p>
+                <ol className="text-sm text-amber-700 space-y-1">
+                  <li>1. Go to Cloudflare Dashboard → My Profile → API Tokens</li>
+                  <li>2. Click "Create Token"</li>
+                  <li>3. Use "Custom token" template</li>
+                  <li>4. Add permissions: Zone:Zone:Edit, Zone:Zone:Read</li>
+                  <li>5. Include specific zone: {formData.domain}</li>
+                </ol>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-3"
+                  onClick={() => window.open('https://dash.cloudflare.com/profile/api-tokens', '_blank')}
+                >
+                  <ExternalLink className="w-4 h-4 mr-1" />
+                  Open Cloudflare Dashboard
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
+          
+          <div className="flex space-x-3">
+            <Button 
+              variant="outline"
+              onClick={() => setCurrentStep(1)}
+              className="flex-1"
+            >
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Back
+            </Button>
+            <Button 
+              onClick={handleConnectCloudflare}
+              disabled={!formData.cloudflareToken || loading}
+              className="flex-1"
+            >
+              {loading ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <Zap className="w-4 h-4 mr-2" />
+              )}
+              Connect Account
+            </Button>
+          </div>
+        </div>
+      )
+    },
+    {
+      id: 'templates',
+      title: 'Choose Protection Rules',
+      description: 'Select which bot protection rules to deploy',
+      component: (
+        <div className="space-y-6">
+          <div className="space-y-4">
+            {[
+              {
+                id: 'block_scrapers',
+                name: 'Block Common Scrapers',
+                description: 'Blocks known scraping bots and automated tools',
+                icon: '🕷️'
+              },
+              {
+                id: 'rate_limit_aggressive',
+                name: 'Aggressive Rate Limiting',
+                description: 'Limits requests to 10 per minute per IP',
+                icon: '⚡'
+              },
+              {
+                id: 'geo_block_suspicious',
+                name: 'Block Suspicious Countries',
+                description: 'Blocks traffic from high-risk countries',
+                icon: '🌍'
+              },
+              {
+                id: 'sql_injection_protection',
+                name: 'SQL Injection Protection',
+                description: 'Blocks common SQL injection attempts',
+                icon: '🔒'
+              },
+              {
+                id: 'xss_protection',
+                name: 'XSS Protection',
+                description: 'Blocks cross-site scripting attempts',
+                icon: '🛡️'
+              }
+            ].map((template) => (
+              <label key={template.id} className="flex items-start space-x-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={formData.selectedTemplates.includes(template.id)}
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      updateFormData('selectedTemplates', [...formData.selectedTemplates, template.id]);
+                    } else {
+                      updateFormData('selectedTemplates', formData.selectedTemplates.filter(id => id !== template.id));
+                    }
+                  }}
+                  className="mt-1"
+                />
+                <div className="flex-1">
+                  <div className="flex items-center space-x-2">
+                    <span className="text-lg">{template.icon}</span>
+                    <h4 className="font-medium">{template.name}</h4>
+                  </div>
+                  <p className="text-sm text-slate-600 mt-1">{template.description}</p>
+                </div>
+              </label>
             ))}
           </div>
           
-          <div className="text-center">
-            <h3 className="font-semibold text-lg">
-              {step <= 3 ? deploymentSteps[step - 1].title : 'Deployment Complete'}
-            </h3>
-            <p className="text-gray-600">
-              {step <= 3 ? deploymentSteps[step - 1].description : 'Your bot protection is now active'}
-            </p>
+          <div className="flex space-x-3">
+            <Button 
+              variant="outline"
+              onClick={() => setCurrentStep(2)}
+              className="flex-1"
+            >
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Back
+            </Button>
+            <Button 
+              onClick={handleDeployWorkers}
+              disabled={formData.selectedTemplates.length === 0 || loading}
+              className="flex-1"
+            >
+              {loading ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <Shield className="w-4 h-4 mr-2" />
+              )}
+              Deploy Protection
+            </Button>
           </div>
+        </div>
+      )
+    }
+  ];
+
+  if (deploymentStatus === 'completed') {
+    return (
+      <div className="text-center py-12">
+        <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+          <CheckCircle className="w-8 h-8 text-green-600" />
+        </div>
+        <h3 className="text-xl font-semibold mb-2">Deployment Complete!</h3>
+        <p className="text-slate-600 mb-6">
+          Your bot protection is now active on {formData.domain}
+        </p>
+        <div className="animate-pulse">
+          <Loader2 className="w-6 h-6 mx-auto animate-spin" />
+          <p className="text-sm text-slate-500 mt-2">Redirecting to dashboard...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-2xl mx-auto">
+      {/* Progress Bar */}
+      <div className="mb-8">
+        <div className="flex items-center justify-between mb-2">
+          {steps.map((step, index) => (
+            <div key={step.id} className="flex items-center">
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
+                index <= currentStep 
+                  ? 'bg-blue-600 text-white' 
+                  : 'bg-slate-200 text-slate-600'
+              }`}>
+                {index < currentStep ? (
+                  <CheckCircle className="w-4 h-4" />
+                ) : (
+                  index + 1
+                )}
+              </div>
+              {index < steps.length - 1 && (
+                <div className={`w-12 h-1 mx-2 ${
+                  index < currentStep ? 'bg-blue-600' : 'bg-slate-200'
+                }`} />
+              )}
+            </div>
+          ))}
+        </div>
+        <div className="flex justify-between text-xs text-slate-500">
+          {steps.map((step) => (
+            <span key={step.id} className="text-center flex-1">
+              {step.title}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {/* Current Step */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center space-x-2">
+            <Shield className="w-5 h-5" />
+            <span>{steps[currentStep].title}</span>
+          </CardTitle>
+          <p className="text-slate-600">{steps[currentStep].description}</p>
+        </CardHeader>
+        <CardContent>
+          {error && (
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md">
+              <div className="flex items-center space-x-2">
+                <AlertCircle className="w-4 h-4 text-red-600" />
+                <span className="text-sm text-red-700">{error}</span>
+              </div>
+            </div>
+          )}
+          
+          {steps[currentStep].component}
         </CardContent>
       </Card>
-
-      {/* Step Content */}
-      {step === 1 && (
-        <Card className="bg-white/70 backdrop-blur-sm border-0 shadow-lg">
-          <CardHeader>
-            <CardTitle className="flex items-center space-x-2">
-              <Zap className="h-5 w-5" />
-              <span>Connect Cloudflare Account</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <Alert className="bg-blue-50 border-blue-200">
-              <AlertTriangle className="h-4 w-4" />
-              <AlertDescription>
-                You'll need a Cloudflare API token with Zone:Edit permissions. 
-                <a href="https://dash.cloudflare.com/profile/api-tokens" className="text-blue-600 hover:underline ml-1">
-                  Create one here <ExternalLink className="h-3 w-3 inline" />
-                </a>
-              </AlertDescription>
-            </Alert>
-            
-            <div className="space-y-2">
-              <Label htmlFor="apiToken">Cloudflare API Token</Label>
-              <Input
-                id="apiToken"
-                type="password"
-                placeholder="Enter your Cloudflare API token"
-                value={apiToken}
-                onChange={(e) => setApiToken(e.target.value)}
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="zoneId">Zone ID (optional)</Label>
-              <Input
-                id="zoneId"
-                placeholder="Auto-detect or enter zone ID"
-                value={zoneId}
-                onChange={(e) => setZoneId(e.target.value)}
-              />
-            </div>
-            
-            <Button 
-              onClick={() => setStep(2)}
-              disabled={!apiToken}
-              className="w-full bg-blue-600 hover:bg-blue-700"
-            >
-              Validate & Continue
-            </Button>
-          </CardContent>
-        </Card>
-      )}
-
-      {step === 2 && (
-        <Card className="bg-white/70 backdrop-blur-sm border-0 shadow-lg">
-          <CardHeader>
-            <CardTitle className="flex items-center space-x-2">
-              <Shield className="h-5 w-5" />
-              <span>Configure Protection</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="bg-gray-50 p-4 rounded-lg">
-              <h3 className="font-semibold mb-2">Domain Configuration</h3>
-              <div className="space-y-2">
-                <div className="flex justify-between">
-                  <span className="text-sm text-gray-600">Domain:</span>
-                  <span className="font-medium">{domain}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-sm text-gray-600">Platform:</span>
-                  <Badge>{platform}</Badge>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-sm text-gray-600">Zone ID:</span>
-                  <span className="font-mono text-sm">{zoneId || 'auto-detected'}</span>
-                </div>
-              </div>
-            </div>
-            
-            <div className="space-y-2">
-              <h3 className="font-semibold">Protection Rules</h3>
-              <div className="space-y-2">
-                <div className="flex items-center justify-between p-2 bg-green-50 rounded">
-                  <span className="text-sm">Block Common Scrapers</span>
-                  <CheckCircle className="h-4 w-4 text-green-600" />
-                </div>
-                <div className="flex items-center justify-between p-2 bg-green-50 rounded">
-                  <span className="text-sm">High Bot Score Protection</span>
-                  <CheckCircle className="h-4 w-4 text-green-600" />
-                </div>
-                <div className="flex items-center justify-between p-2 bg-green-50 rounded">
-                  <span className="text-sm">{platform} Specific Rules</span>
-                  <CheckCircle className="h-4 w-4 text-green-600" />
-                </div>
-              </div>
-            </div>
-            
-            <div className="flex space-x-4">
-              <Button 
-                variant="outline" 
-                onClick={() => setStep(1)}
-                className="flex-1"
-              >
-                Back
-              </Button>
-              <Button 
-                onClick={() => setStep(3)}
-                className="flex-1 bg-blue-600 hover:bg-blue-700"
-              >
-                Review & Deploy
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {step === 3 && (
-        <Card className="bg-white/70 backdrop-blur-sm border-0 shadow-lg">
-          <CardHeader>
-            <CardTitle className="flex items-center space-x-2">
-              <CheckCircle className="h-5 w-5" />
-              <span>Ready to Deploy</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <Alert className="bg-green-50 border-green-200">
-              <CheckCircle className="h-4 w-4" />
-              <AlertDescription>
-                Your bot protection worker is ready to deploy. This will take approximately 1-2 minutes.
-              </AlertDescription>
-            </Alert>
-            
-            <div className="bg-gray-50 p-4 rounded-lg">
-              <h3 className="font-semibold mb-2">Deployment Summary</h3>
-              <div className="space-y-1 text-sm">
-                <div>✓ Cloudflare account connected</div>
-                <div>✓ Zone configuration verified</div>
-                <div>✓ Protection rules configured</div>
-                <div>✓ {platform} optimizations enabled</div>
-              </div>
-            </div>
-            
-            <div className="flex space-x-4">
-              <Button 
-                variant="outline" 
-                onClick={() => setStep(2)}
-                className="flex-1"
-                disabled={isDeploying}
-              >
-                Back
-              </Button>
-              <Button 
-                onClick={handleDeploy}
-                disabled={isDeploying}
-                className="flex-1 bg-green-600 hover:bg-green-700"
-              >
-                {isDeploying ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Deploying...
-                  </>
-                ) : (
-                  'Deploy Protection'
-                )}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {step === 4 && (
-        <Card className="bg-white/70 backdrop-blur-sm border-0 shadow-lg">
-          <CardHeader>
-            <CardTitle className="flex items-center space-x-2">
-              <CheckCircle className="h-5 w-5 text-green-600" />
-              <span>Deployment Successful!</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <Alert className="bg-green-50 border-green-200">
-              <CheckCircle className="h-4 w-4" />
-              <AlertDescription>
-                Your bot protection is now active on {domain}. It may take a few minutes to propagate globally.
-              </AlertDescription>
-            </Alert>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="bg-gray-50 p-4 rounded-lg">
-                <h3 className="font-semibold mb-2">Worker Details</h3>
-                <div className="space-y-1 text-sm">
-                  <div>Worker Name: bot-shield-{domain.replace('.', '-')}</div>
-                  <div>Status: Active</div>
-                  <div>Last Updated: {new Date().toLocaleString()}</div>
-                </div>
-              </div>
-              
-              <div className="bg-gray-50 p-4 rounded-lg">
-                <h3 className="font-semibold mb-2">Next Steps</h3>
-                <div className="space-y-1 text-sm">
-                  <div>• Monitor traffic in the dashboard</div>
-                  <div>• Adjust rules as needed</div>
-                  <div>• Review savings reports</div>
-                </div>
-              </div>
-            </div>
-            
-            <div className="space-y-2">
-              <h3 className="font-semibold">Worker Script</h3>
-              <div className="bg-gray-900 text-green-400 p-4 rounded-lg font-mono text-sm">
-                <pre className="overflow-x-auto">{workerScript}</pre>
-              </div>
-              <Button 
-                variant="outline" 
-                onClick={() => copyToClipboard(workerScript)}
-                className="w-full"
-              >
-                <Copy className="h-4 w-4 mr-2" />
-                Copy Worker Script
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
     </div>
   );
 }
