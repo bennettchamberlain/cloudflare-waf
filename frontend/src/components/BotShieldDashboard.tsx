@@ -25,7 +25,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 
 // Import the new components we'll create
 import { PlatformSelector } from './PlatformSelector';
-import { DeploymentWizard } from './DeploymentWizard';
+import DeploymentWizard from './DeploymentWizard';
 import { RulesManager } from './RulesManager';
 import { SavingsReport } from './SavingsReport';
 import { RealTimeMonitor } from './RealTimeMonitor';
